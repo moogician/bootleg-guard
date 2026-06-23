@@ -284,6 +284,7 @@ body {
   max-width: 540px;
 }
 .cli-desc strong { color: var(--text); font-weight: 500; }
+.cli-desc a { color: var(--text); text-underline-offset: 2px; }
 .code-block {
   background: var(--code-bg);
   color: var(--code-text);
@@ -406,10 +407,9 @@ footer {
     <p class="section-label">Run a live check</p>
     <p class="cli-desc">
       The lookup above searches our static scan from June 2026. For a <strong>live crawl</strong> —
-      current page content, GitHub source search, and linked-page walking — install the CLI.
+      current page content, GitHub source search, and linked-page walking — install the CLI from our <a href="https://github.com/hwang628/bootleg" target="_blank" rel="noopener">GitHub repo</a>.
     </p>
-    <div class="code-block" role="region" aria-label="CLI commands">
-<span class="c"># install</span>
+    <div class="code-block" role="region" aria-label="CLI commands"><span class="c"># install</span>
 <span class="p">$</span> <span class="kw">pip install</span> <span class="s">bootlegg</span>
 
 <span class="c"># check a github.io site (source scan + live crawl)</span>
