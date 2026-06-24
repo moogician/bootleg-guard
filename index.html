@@ -460,6 +460,82 @@ footer {
     staticfile:    'staticfile.org/net',
   };
 
+  // ── Live-check CDN patterns ───────────────────────────────────────────────
+  const FUNNULL_PATTERNS = [
+    { key: 'polyfill.io', re: /(?:https?:)?\/\/(?:cdn\.)?polyfill\.io/i },
+    { key: 'bootcss',     re: /(?:https?:)?\/\/(?:[a-z0-9-]+\.)*bootcss\.com/i },
+    { key: 'bootcdn',     re: /(?:https?:)?\/\/(?:[a-z0-9-]+\.)*bootcdn\.net/i },
+    { key: 'staticfile',  re: /(?:https?:)?\/\/(?:[a-z0-9-]+\.)*staticfile\.(?:org|net)/i },
+  ];
+
+  function grepForCDNs(html) {
+    return FUNNULL_PATTERNS.filter(p => p.re.test(html)).map(p => p.key);
+  }
+
+  // Parse a query into {owner, repo, siteUrl} for github.io URLs, or null
+  function parseGithubIo(q) {
+    const s = norm(q);
+    let owner, repo;
+    if (s.includes('.github.io')) {
+      const [host, ...rest] = s.split('/');
+      owner = host.replace('.github.io', '');
+      repo  = rest[0] || '';
+    } else if (s.includes('/') && !s.includes('.')) {
+      [owner, repo] = s.split('/');
+    } else if (!s.includes('.')) {
+      owner = s; repo = '';
+    } else {
+      return null;
+    }
+    if (!owner) return null;
+    const siteUrl = `https://${owner}.github.io${repo ? '/' + repo : ''}/`;
+    return { owner, repo, siteUrl };
+  }
+
+  async function fetchWithTimeout(url, opts, ms) {
+    const ctrl = new AbortController();
+    const tid = setTimeout(() => ctrl.abort(), ms);
+    try { return await fetch(url, { ...opts, signal: ctrl.signal }); }
+    finally { clearTimeout(tid); }
+  }
+
+  async function fetchLivePage(siteUrl) {
+    const proxy = `https://api.allorigins.win/get?url=${encodeURIComponent(siteUrl)}`;
+    const res = await fetchWithTimeout(proxy, {}, 10000);
+    if (!res.ok) return '';
+    const data = await res.json();
+    return data.contents || '';
+  }
+
+  async function fetchRawSource(owner, repo) {
+    const files = ['index.html', 'index.htm', '_includes/head.html', '_layouts/default.html'];
+    for (const f of files) {
+      try {
+        const url = `https://raw.githubusercontent.com/${owner}/${repo}/HEAD/${f}`;
+        const res = await fetchWithTimeout(url, {}, 6000);
+        if (res.ok) {
+          const text = await res.text();
+          const hits = grepForCDNs(text);
+          if (hits.length) return hits;
+        }
+      } catch (_) {}
+    }
+    return [];
+  }
+
+  async function doLiveCheck(parsed) {
+    const { owner, repo, siteUrl } = parsed;
+    const [liveResult, sourceResult] = await Promise.allSettled([
+      fetchLivePage(siteUrl).then(grepForCDNs),
+      fetchRawSource(owner, repo),
+    ]);
+    const liveHits   = liveResult.status   === 'fulfilled' ? liveResult.value   : [];
+    const sourceHits = sourceResult.status === 'fulfilled' ? sourceResult.value : [];
+    const liveOk   = liveResult.status   === 'fulfilled';
+    const sourceOk = sourceResult.status === 'fulfilled';
+    return { liveHits, sourceHits, liveOk, sourceOk, siteUrl };
+  }
+
   // index: lowercase site → entry, lowercase owner → [entries]
   const byExact = new Map();
   const byUser  = new Map();
@@ -546,6 +622,73 @@ footer {
     return div;
   }
 
+  function buildLiveChecking(siteUrl) {
+    const div = document.createElement('div');
+    div.className = 'result-card';
+    div.setAttribute('role', 'article');
+    div.innerHTML = `
+      <div class="verdict-tag notfound" style="color:var(--muted)">
+        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);margin-right:6px;animation:pip-pulse 1s ease-in-out infinite"></span>
+        Not in database — scanning live…
+      </div>
+      <div class="result-site">${esc(siteUrl)}</div>
+      <p class="result-advice">Fetching the live page and checking source files for Funnull CDN references…</p>
+    `;
+    return div;
+  }
+
+  function buildLiveInfected(q, { liveHits, sourceHits, siteUrl }) {
+    const allHits = [...new Set([...liveHits, ...sourceHits])];
+    const liveOnly = liveHits.length > 0;
+    const div = document.createElement('div');
+    div.className = 'result-card state-infected';
+    div.setAttribute('role', 'article');
+    div.innerHTML = `
+      <div class="verdict-tag infected" style="gap:8px">
+        <span class="verdict-pip" aria-hidden="true">!</span>
+        Infected
+        <span style="font-size:9px;letter-spacing:0.18em;background:var(--accent);color:#fff;padding:2px 6px;border-radius:2px">LIVE</span>
+      </div>
+      <div class="result-site">${esc(siteUrl)}</div>
+      <div class="result-row">
+        <strong>CDN${allHits.length > 1 ? 's' : ''}:</strong> ${cdnTagsHtml(allHits)}
+      </div>
+      <div class="result-row">
+        <strong>Found in:</strong>
+        ${liveHits.length ? 'live page' : ''}${liveHits.length && sourceHits.length ? ' · ' : ''}${sourceHits.length ? 'source files' : ''}
+      </div>
+      <p class="result-advice">
+        This site was not in our pre-scan database but the CDN reference was found in a live check right now.
+        Remove the <code>&lt;script src&gt;</code> referencing this CDN.
+        For a full crawl: <code>bootlegg ${esc(q)}</code>
+      </p>
+    `;
+    return div;
+  }
+
+  function buildLiveClean(q, { liveOk, sourceOk, siteUrl }) {
+    const div = document.createElement('div');
+    div.className = 'result-card';
+    div.setAttribute('role', 'article');
+    div.style.borderLeftColor = 'var(--clean)';
+    div.style.borderLeftWidth = '4px';
+    div.innerHTML = `
+      <div class="verdict-tag" style="color:var(--clean)">
+        <span style="display:inline-block;width:14px;height:14px;border-radius:50%;background:var(--clean);color:#fff;font-size:10px;font-weight:700;text-align:center;line-height:14px;flex-shrink:0">✓</span>
+        Not found
+        <span style="font-size:9px;letter-spacing:0.18em;background:var(--clean);color:#fff;padding:2px 6px;border-radius:2px;margin-left:4px">LIVE</span>
+      </div>
+      <div class="result-site">${esc(siteUrl)}</div>
+      <p class="result-advice">
+        Not in our scan database, and no Funnull CDN references found in a live check
+        ${liveOk ? '(live page' : '(live page unavailable'}${sourceOk ? ' + source files' : ''}).
+        Looks clean — but for a thorough crawl of all linked pages:
+        <code>bootlegg ${esc(q)}</code>
+      </p>
+    `;
+    return div;
+  }
+
   function buildNotFound(q) {
     const div = document.createElement('div');
     div.className = 'result-card';
@@ -554,16 +697,14 @@ footer {
       <div class="verdict-tag notfound">Not in our scan</div>
       <div class="result-site">${esc(q)}</div>
       <p class="result-advice">
-        This site wasn't caught in our June 2026 crawl. It may be clean, not indexed,
-        or fixed before we ran. For a definitive live check:
-        <code>bootlegg ${esc(q)}</code>
+        Couldn't parse this as a GitHub Pages URL, so no live check was possible.
+        For a definitive check: <code>bootlegg ${esc(q)}</code>
       </p>
     `;
     return div;
   }
 
   function renderCards(container, q, matches) {
-    if (!matches.length) { container.appendChild(buildNotFound(norm(q))); return; }
     if (matches.length > 1) {
       const c = document.createElement('div');
       c.className = 'multi-count';
@@ -586,21 +727,49 @@ footer {
     container.innerHTML = '';
     if (!norm(raw)) return;
 
-    if (animated) {
-      const track = document.createElement('div');
-      track.className = 'scan-track';
-      const fill = document.createElement('div');
-      fill.className = 'scan-fill';
-      track.appendChild(fill);
-      container.appendChild(track);
-      clearTimeout(scanTimer);
-      scanTimer = setTimeout(() => {
-        container.innerHTML = '';
+    if (matches.length > 0) {
+      // Local hit — run normal scan animation then show cards
+      if (animated) {
+        const track = document.createElement('div');
+        track.className = 'scan-track';
+        const fill = document.createElement('div');
+        fill.className = 'scan-fill';
+        track.appendChild(fill);
+        container.appendChild(track);
+        clearTimeout(scanTimer);
+        scanTimer = setTimeout(() => {
+          container.innerHTML = '';
+          renderCards(container, raw, matches);
+        }, 640);
+      } else {
         renderCards(container, raw, matches);
-      }, 640);
-    } else {
-      renderCards(container, raw, matches);
+      }
+      return;
     }
+
+    // No local hit — try live check
+    const parsed = parseGithubIo(raw);
+    if (!parsed) {
+      container.appendChild(buildNotFound(norm(raw)));
+      return;
+    }
+
+    // Show "scanning live" placeholder immediately
+    const placeholder = buildLiveChecking(parsed.siteUrl);
+    container.appendChild(placeholder);
+
+    doLiveCheck(parsed).then(result => {
+      container.innerHTML = '';
+      const allHits = [...new Set([...result.liveHits, ...result.sourceHits])];
+      if (allHits.length > 0) {
+        container.appendChild(buildLiveInfected(norm(raw), result));
+      } else {
+        container.appendChild(buildLiveClean(norm(raw), result));
+      }
+    }).catch(() => {
+      container.innerHTML = '';
+      container.appendChild(buildNotFound(norm(raw)));
+    });
   }
 
   document.getElementById('search-form').addEventListener('submit', e => {
@@ -613,8 +782,13 @@ footer {
   document.getElementById('search-input').addEventListener('input', e => {
     clearTimeout(debounce);
     const q = e.target.value;
+    // Only trigger live check on explicit submit, not on debounced input
+    const matches = doSearch(q);
     if (norm(q).length < 2) { clearTimeout(scanTimer); document.getElementById('results').innerHTML = ''; return; }
-    debounce = setTimeout(() => showResults(q, doSearch(q), false), 180);
+    if (matches.length > 0) {
+      debounce = setTimeout(() => showResults(q, matches, false), 180);
+    }
+    // Don't auto-trigger live check on keystroke — wait for submit
   });
 
   // ?q= pre-fill
