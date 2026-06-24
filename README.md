@@ -3,7 +3,7 @@
 Detect GitHub Pages sites loading scripts from Funnull-controlled CDNs —
 polyfill.io, BootCSS, BootCDN, Staticfile, and a growing set of typosquat fronts.
 
-**[Check your site →](https://hwang628.github.io/bootleg/)**
+**[Check your site →](https://moogician.github.io/bootleg-guard/)**
 
 Our scan found **1,960 GitHub Pages sites** still loading malicious CDN scripts as of June 2026:
 786 via polyfill.io (weaponized June 2024), 1,191 via Funnull's BootCSS / BootCDN / Staticfile
