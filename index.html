@@ -536,6 +536,20 @@ footer {
     return { liveHits, sourceHits, liveOk, sourceOk, siteUrl };
   }
 
+  // For arbitrary URLs (non-github.io): just fetch and grep the page itself
+  function toAbsoluteUrl(raw) {
+    const s = raw.trim();
+    if (/^https?:\/\//i.test(s)) return s;
+    if (s.includes('.')) return 'https://' + s;
+    return null;
+  }
+
+  async function doSimpleLiveCheck(url) {
+    const html = await fetchLivePage(url);
+    const liveHits = grepForCDNs(html);
+    return { liveHits, sourceHits: [], liveOk: html.length > 0, sourceOk: false, siteUrl: url };
+  }
+
   // index: lowercase site → entry, lowercase owner → [entries]
   const byExact = new Map();
   const byUser  = new Map();
@@ -748,17 +762,20 @@ footer {
     }
 
     // No local hit — try live check
-    const parsed = parseGithubIo(raw);
-    if (!parsed) {
+    const parsed   = parseGithubIo(raw);
+    const directUrl = !parsed ? toAbsoluteUrl(raw.trim()) : null;
+
+    if (!parsed && !directUrl) {
       container.appendChild(buildNotFound(norm(raw)));
       return;
     }
 
-    // Show "scanning live" placeholder immediately
-    const placeholder = buildLiveChecking(parsed.siteUrl);
-    container.appendChild(placeholder);
+    const siteUrl = parsed ? parsed.siteUrl : directUrl;
+    container.appendChild(buildLiveChecking(siteUrl));
 
-    doLiveCheck(parsed).then(result => {
+    const checkPromise = parsed ? doLiveCheck(parsed) : doSimpleLiveCheck(directUrl);
+
+    checkPromise.then(result => {
       container.innerHTML = '';
       const allHits = [...new Set([...result.liveHits, ...result.sourceHits])];
       if (allHits.length > 0) {
