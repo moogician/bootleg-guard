@@ -46,6 +46,7 @@ import sys
 import time
 from collections import deque
 from html.parser import HTMLParser
+from pathlib import Path
 from typing import Optional
 from urllib.parse import urljoin, urlparse
 
@@ -451,6 +452,133 @@ async def check(url: str, token: Optional[str], max_pages: int, no_github: bool)
 
 
 # ---------------------------------------------------------------------------
+# Local file fix
+# ---------------------------------------------------------------------------
+
+# CDNs we can auto-replace with a safe equivalent (same URL path format)
+_SAFE_DOMAINS: dict[str, str] = {
+    "polyfill.io":    "polyfill-fastly.io",   # Fastly drop-in mirror
+    "polyfill.cn":    "polyfill-fastly.io",
+    "polyfill.com":   "polyfill-fastly.io",
+    "bootcss.com":    "cdnjs.cloudflare.com",  # same /ajax/libs/... path
+    "bootcdn.net":    "cdnjs.cloudflare.com",
+    "staticfile.org": "cdnjs.cloudflare.com",
+    "staticfile.net": "cdnjs.cloudflare.com",
+}
+
+_LOCAL_EXTENSIONS = {".html", ".htm", ".js", ".ts", ".jsx", ".tsx", ".css", ".vue", ".svelte"}
+
+
+def _fix_replacer(safe_domain: str):
+    """Return a re.sub replacement function that swaps only the domain."""
+    def _fn(m: re.Match) -> str:
+        s = m.group()
+        if "//" in s:
+            cut = s.index("//") + 2
+            return s[:cut] + safe_domain   # keep scheme (https:// or //)
+        return safe_domain
+    return _fn
+
+
+def apply_fix(content: str) -> tuple[str, list[dict]]:
+    """Patch fixable Funnull CDN refs in *content*. Returns (patched, changes)."""
+    fixable = [
+        (family, cdn, pat)
+        for family, cdn, pat in _POLYFILL_FAMILY + _FUNNULL_CONFIRMED
+        if cdn in _SAFE_DOMAINS
+    ]
+    changes: list[dict] = []
+    lines = content.splitlines(keepends=True)
+    new_lines: list[str] = []
+    for lineno, line in enumerate(lines, 1):
+        new_line = line
+        for _family, cdn, pat in fixable:
+            safe = _SAFE_DOMAINS[cdn]
+            patched = pat.sub(_fix_replacer(safe), new_line)
+            if patched != new_line:
+                changes.append({
+                    "line": lineno,
+                    "cdn":  cdn,
+                    "safe": safe,
+                })
+                new_line = patched
+        new_lines.append(new_line)
+    return "".join(new_lines), changes
+
+
+def scan_local_path(target: str, fix: bool) -> int:
+    """Scan a local file or directory for Funnull CDN refs. Returns exit code."""
+    root = Path(target)
+    if root.is_file():
+        candidates = [root]
+    else:
+        candidates = sorted(
+            p for p in root.rglob("*")
+            if p.is_file() and p.suffix.lower() in _LOCAL_EXTENSIONS
+        )
+
+    W = 62
+    print(f"\n{'─' * W}")
+    print(f"  bootlegg — local {'scan + fix' if fix else 'scan'}  —  {target}")
+    print(f"{'─' * W}")
+
+    total_refs = 0
+    total_fixes = 0
+    total_warns = 0
+
+    for path in candidates:
+        try:
+            original = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as e:
+            print(f"\n  [error] {path}: {e}")
+            continue
+
+        all_matches = find_matches(original)
+        if not all_matches:
+            continue
+
+        patched, changes = apply_fix(original)
+        fixed_cdns = {c["cdn"] for c in changes}
+        unfixable = [m for m in all_matches if m["cdn"] not in _SAFE_DOMAINS]
+
+        total_refs  += len(all_matches)
+        total_fixes += len(changes)
+        total_warns += len(unfixable)
+
+        rel = path.relative_to(root) if root.is_dir() else path
+        print(f"\n  {rel}")
+
+        if changes:
+            if fix:
+                bak = path.with_suffix(path.suffix + ".bak")
+                if not bak.exists():
+                    bak.write_bytes(path.read_bytes())
+                path.write_text(patched, encoding="utf-8")
+                for c in changes:
+                    print(f"    [fixed]  line {c['line']:4d}  {c['cdn']} → {c['safe']}")
+            else:
+                for c in changes:
+                    print(f"    [fix]    line {c['line']:4d}  {c['cdn']} → {c['safe']}  (pass --fix to apply)")
+
+        for m in unfixable:
+            print(f"    [warn]   line  ?    {m['cdn']}  [{m['family']}] — remove manually")
+            print(f"             …{m['context'][:80]}…")
+
+    print(f"\n{'─' * W}")
+    if total_refs == 0:
+        print("  ✓  No malicious CDN references found.")
+    elif fix:
+        print(f"  {total_refs} reference(s) found — {total_fixes} replaced, {total_warns} need manual removal.")
+        if total_fixes:
+            print("  Originals backed up as <filename>.bak")
+    else:
+        print(f"  {total_refs} reference(s) found — {total_fixes} replaceable with --fix, {total_warns} need manual removal.")
+    print(f"{'─' * W}\n")
+
+    return 1 if total_refs > 0 else 0
+
+
+# ---------------------------------------------------------------------------
 # Output
 # ---------------------------------------------------------------------------
 
@@ -521,7 +649,10 @@ async def _main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("url", help="URL to check")
+    parser.add_argument(
+        "url",
+        help="URL to scan, or a local file/directory path.",
+    )
     parser.add_argument("--version", "-V", action="version", version=f"bootlegg {__version__}")
     parser.add_argument(
         "--token", "-t", metavar="TOKEN",
@@ -537,7 +668,16 @@ async def _main() -> None:
     )
     parser.add_argument(
         "--json", action="store_true", dest="json_out",
-        help="Output full results as JSON.",
+        help="Output full results as JSON (URL mode only).",
+    )
+    parser.add_argument(
+        "--fix", action="store_true",
+        help=(
+            "When target is a local file or directory: replace Funnull CDN references "
+            "in-place. polyfill.io/cn/com → polyfill-fastly.io, "
+            "bootcss/bootcdn/staticfile → cdnjs.cloudflare.com. "
+            "Originals are backed up as <file>.bak."
+        ),
     )
     parser.add_argument(
         "--log-level", default="WARNING",
@@ -550,6 +690,14 @@ async def _main() -> None:
         format="%(asctime)s  %(levelname)-7s  %(message)s",
         datefmt="%H:%M:%S",
     )
+
+    # Local file/directory mode
+    if Path(args.url).exists():
+        sys.exit(scan_local_path(args.url, args.fix))
+
+    # URL mode
+    if args.fix:
+        print("NOTE: --fix only applies to local file/directory targets.", file=sys.stderr)
 
     token = args.token or os.environ.get("GITHUB_TOKEN")
     if not token and not args.no_github and github_io_repo(args.url):

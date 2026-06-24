@@ -78,11 +78,30 @@ bootlegg https://user.github.io/ --json | jq .summary
 
 ## Fix
 
-Remove `<script>` tags referencing any of these CDNs.
+`bootlegg` can automatically patch local files:
 
-For polyfill.io specifically: most use cases are unnecessary in modern browsers.
-If you do need a polyfill, use [Fastly's drop-in mirror](https://polyfill-fastly.io/v3/polyfill.min.js)
-or bundle it with your build tool.
+```bash
+# Scan a local directory and show what would change
+bootlegg ./my-site
+
+# Apply fixes in-place (originals backed up as <file>.bak)
+bootlegg ./my-site --fix
+
+# Or a single file
+bootlegg index.html --fix
+```
+
+Auto-replacements applied by `--fix`:
+
+| Malicious CDN | Safe replacement |
+|---|---|
+| polyfill.io / polyfill.cn / polyfill.com | `polyfill-fastly.io` (drop-in) |
+| bootcss.com / bootcdn.net | `cdnjs.cloudflare.com` |
+| staticfile.org / staticfile.net | `cdnjs.cloudflare.com`* |
+
+\* staticfile.org uses `/{lib}/{ver}/` paths vs. cdnjs's `/ajax/libs/{lib}/{ver}/` — verify those URLs load after fixing.
+
+Typosquats and C2 infrastructure (macoms.la etc.) are flagged but not auto-replaced — remove those `<script>` tags manually.
 
 ## Scan data
 
