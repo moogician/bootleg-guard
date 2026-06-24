@@ -1,9 +1,9 @@
 # GitHub Pages Sites with Live Malicious CDN References
 
-Scan date: 2026-06-22  
-Method: GitHub code-search → GitHub Pages source verification → multi-page live crawl (up to 30 pages per site)
+Scan date: 2026-06-22 (subdomain scan) + 2026-06-23 (Sourcegraph scan)  
+Method: GitHub code-search → GitHub Pages source verification → multi-page live crawl (up to 30 pages per site); supplemented by Sourcegraph discovery + live root-page verification
 
-**1,206 unique GitHub Pages sites confirmed infected (CDN script still loading on the live site).**
+**1,960 unique GitHub Pages sites confirmed infected across both scans (CDN script still loading on the live site).**
 
 CDN families detected:
 - **polyfill.io** — acquired by Funnull (Chinese CDN), malware injected June 2024. Redirects mobile users to gambling/adult sites via fake browser-update popups. ~100k sites globally affected at peak.
@@ -12,7 +12,33 @@ CDN families detected:
 
 ---
 
-## Summary by CDN
+## Impact
+
+The victims are not just personal portfolios. The 1,960 confirmed-infected sites collectively carry over **530,000 GitHub stars** — a rough proxy for developer traffic — with 66 repositories above 1,000 stars each.
+
+The most-starred case is **CyC2018/CS-Notes** (184,000 ⭐), the de facto technical interview reference for Chinese software engineers, serving the malicious domain across every one of its crawled pages. Beside it sits **hollischuang/toBeTopJavaer** (25,000 ⭐), another Java career guide with a comparable audience. **microsoft/AirSim** (18,000 ⭐) — a Microsoft open-source drone and autonomous vehicle simulator — serves its documentation through a GitHub Pages site that loads the compromised script. **deeplearning-ai/machine-learning-yearning-cn** (7,800 ⭐), the Chinese translation of Andrew Ng's foundational ML text published under the DeepLearning.AI organization, is infected. So is **poloclub/cnn-explainer** (8,900 ⭐), an interactive neural network visualization built by Georgia Tech researchers and widely used in university ML courses. **ApoorvSaxena/lozad.js** (7,500 ⭐), a lazy-loading library embedded in countless downstream projects, serves its own documentation site through the same domain. **Lea Verou's Bliss.js** (2,400 ⭐) — authored by a W3C TAG member — rounds out the open-source library category.
+
+University course pages are disproportionately represented: infected sites include a KU Leuven hardware-software co-design course, a Harvard Bioinformatics R workshop, a UC Berkeley statistics course, and an undergraduate CS class at Ursinus College. Research institution homepages from the Swedish Bioinformatics Institute and Genomics Aotearoa carry it into scientific communities. Long-running technical blogs with years of archived posts serve it on every page in the archive.
+
+In each case, the site's own readers — developers looking up API references, students loading a lecture, researchers clicking through a project page — are silently reaching out to a domain the U.S. Treasury sanctioned in May 2025 for running a criminal CDN.
+
+---
+
+## Summary
+
+| Metric | Polyfill<br>(`polyfill.io`) | Other Funnull CDNs<br>(`bootcss`, `bootcdn`, `staticfile`) | Total (unique) |
+|--------|----------------------------:|------------------------------------------------------------:|---------------:|
+| Sites with any mentions | 4,634 | 7,955 | 12,394 |
+| Sites with infected source code | 3,000 | 2,306 | 5,268 |
+| Sites live-crawled | 1,784 | 2,588 | 4,315 |
+| **Sites actively loading malware** | **786** | **1,191** | **1,960** |
+| **Total infected pages across live sites** | **4,228** | **14,156** | **18,384** |
+
+*Polyfill and Other columns count independently — 195 sites load both families and appear in each. Total column is the unique union across both.*
+
+---
+
+## Summary by CDN (original subdomain scan)
 
 | CDN | Live-infected sites |
 |-----|---------------------|

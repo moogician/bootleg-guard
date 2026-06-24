@@ -5,9 +5,12 @@ polyfill.io, BootCSS, BootCDN, Staticfile, and a growing set of typosquat fronts
 
 **[Check your site →](https://hwang628.github.io/bootleg/)**
 
-Our scan found **1,206 GitHub Pages sites** still loading malicious CDN scripts as of June 2026:
-433 via polyfill.io (weaponized June 2024), 780 via Funnull's BootCSS / BootCDN / Staticfile
-CDNs (malicious since June 2023, OFAC-sanctioned May 2025).
+Our scan found **1,960 GitHub Pages sites** still loading malicious CDN scripts as of June 2026:
+786 via polyfill.io (weaponized June 2024), 1,191 via Funnull's BootCSS / BootCDN / Staticfile
+CDNs (malicious since June 2023, OFAC-sanctioned May 2025). Infected sites collectively carry
+over 530,000 GitHub stars — including microsoft/AirSim (18k ⭐), deeplearning-ai/machine-learning-yearning-cn
+(7.8k ⭐), and CyC2018/CS-Notes (184k ⭐), the primary technical interview reference for Chinese
+software engineers.
 
 ---
 
@@ -83,18 +86,9 @@ or bundle it with your build tool.
 
 ## Scan data
 
-[`infected_sites.md`](infected_sites.md) — 1,206 GitHub Pages sites confirmed
-loading malicious CDN scripts during our June 2026 crawl (up to 30 pages per site).
-
-[`infected_sites.json`](infected_sites.json) — same data as structured JSON.
-
-## Scanning tools (for researchers)
-
-| Script | Purpose |
-|--------|---------|
-| `scan.py` | GitHub code search → polyfill.io source + live infection scan |
-| `scan_funnull.py` | Same but for BootCSS / BootCDN / Staticfile |
-| `check_polyfill_subdomains.py` | Multi-page re-crawl with subdomain-aware matching |
+[`infected_sites.md`](infected_sites.md) — 1,960 GitHub Pages sites confirmed
+loading malicious CDN scripts across two June 2026 scans (subdomain BFS crawl up to 30 pages
+per site + Sourcegraph-based discovery).
 
 ## Background
 
